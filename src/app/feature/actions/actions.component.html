@@ -1,0 +1,8 @@
+<div id="box" #box
+     [attr.data-state]="currentState$ | async"
+     [attr.data-point]="clickPoint$ | async"
+     [style.top]="(boxPosition$ | async)?.y + 'px'"
+     [style.left]="(boxPosition$ | async)?.x + 'px'"
+     (mouseup)="onMouseUp($event)"
+     (mousedown)="onMouseDown($event)"></div>
+<div>Box Position: {{boxPosition$ | async  | json}} </div>

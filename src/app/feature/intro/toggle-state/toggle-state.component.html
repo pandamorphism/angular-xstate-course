@@ -1,0 +1,8 @@
+<header>
+  <h1>Exercise 02 - XState</h1>
+</header>
+<main>
+  <div id="box" [attr.data-state]="currentState$ | async" #box
+       (mouseup)="service.send($event)"
+       (mousedown)="service.send($event)"></div>
+</main>
