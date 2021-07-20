@@ -2,7 +2,7 @@ import {AfterViewInit, Component, ElementRef, NgZone, OnInit, ViewChild} from '@
 import {assign, createMachine} from "xstate";
 import {InterpretedService, XstateAngular} from "xstate-angular";
 import {fromEvent, Observable, Subject} from "rxjs";
-import {map, shareReplay, switchMap, takeUntil, tap} from "rxjs/operators";
+import {filter, map, shareReplay, switchMap, takeUntil, tap} from "rxjs/operators";
 
 export interface DndStates {
   states: {
@@ -30,6 +30,9 @@ const dndMachine = createMachine({
   states: {
     idle: {
       on: {
+        ESC: {
+          actions: assign({point: {x: 0, y: 0}, dx: 0, dy: 0, boxPosition: {x: 0, y: 0}})
+        },
         MOUSE_DOWN: {
           target: 'dragging',
           actions: assign({point: (context, event: MouseDownEvent) => ({x: event.clientX, y: event.clientY})}),
@@ -42,7 +45,7 @@ const dndMachine = createMachine({
       on: {
         MOUSE_UP: {
           target: 'idle',
-          actions: assign<DnDContext, DnDMachineEvents>({
+          actions: assign<DnDContext, MouseUpEvent>({
             boxPosition: (ctx: DnDContext, _) => ({x: ctx.boxPosition.x + ctx.dx, y: ctx.boxPosition.y + ctx.dy}),
             point: (ctx, _) => ({x: ctx.point.x + ctx.dx, y: ctx.point.y + ctx.dy}),
             dx: 0,
@@ -50,7 +53,7 @@ const dndMachine = createMachine({
           })
         },
         MOUSE_MOVE: {
-          actions: assign<DnDContext, DnDMachineEvents>({
+          actions: assign<DnDContext, MouseMoveEvent>({
             dx: (ctx, event) => event.clientX - ctx.point.x,
             dy: (ctx, event) => event.clientY - ctx.point.y,
           })
@@ -74,6 +77,10 @@ export class MouseUpEvent {
   }
 }
 
+export class Esc {
+  readonly type = 'ESC'
+}
+
 export class MouseMoveEvent {
   readonly type = 'MOUSE_MOVE'
 
@@ -81,7 +88,7 @@ export class MouseMoveEvent {
   }
 }
 
-export type DnDMachineEvents = MouseDownEvent | MouseUpEvent | MouseMoveEvent
+export type DnDMachineEvents = MouseDownEvent | MouseUpEvent | MouseMoveEvent | Esc
 
 @Component({
   selector: 'app-actions',
@@ -116,6 +123,10 @@ export class ActionsComponent implements OnInit, AfterViewInit {
       map(s => s.context.boxPosition),
       shareReplay(1),
     );
+    fromEvent<KeyboardEvent>(window.document.body, "keyup").pipe(
+      filter(ev => ev.key === 'Escape'),
+      tap(_ => this.service.send(new Esc()))
+    ).subscribe()
   }
 
   onMouseUp({clientY, clientX}: MouseEvent) {
