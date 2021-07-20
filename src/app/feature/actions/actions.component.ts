@@ -1,4 +1,4 @@
-import {Component, ElementRef, OnInit, ViewChild} from '@angular/core';
+import {AfterViewInit, Component, ElementRef, NgZone, OnInit, ViewChild} from '@angular/core';
 import {assign, createMachine} from "xstate";
 import {InterpretedService, XstateAngular} from "xstate-angular";
 import {fromEvent, Observable, Subject} from "rxjs";
@@ -89,7 +89,7 @@ export type DnDMachineEvents = MouseDownEvent | MouseUpEvent | MouseMoveEvent
   styleUrls: ['./actions.component.scss'],
   providers: [XstateAngular]
 })
-export class ActionsComponent implements OnInit {
+export class ActionsComponent implements OnInit, AfterViewInit {
   @ViewChild('box') box: ElementRef | undefined;
   service: InterpretedService<DnDContext, DndStates, DnDMachineEvents>
   currentState$: Observable<string> | undefined;
@@ -98,7 +98,8 @@ export class ActionsComponent implements OnInit {
   private draggingFinished$: Subject<void> = new Subject();
   private draggingStarted$: Subject<void> = new Subject();
 
-  constructor(private readonly xState: XstateAngular<DnDContext, DndStates, DnDMachineEvents>) {
+  constructor(private readonly xState: XstateAngular<DnDContext, DndStates, DnDMachineEvents>,
+              private ngZone: NgZone) {
     this.service = this.xState.useMachine(dndMachine, {
         actions: {
           onDraggingEntry: (_, event) => this.draggingStarted$.next(),
@@ -106,12 +107,6 @@ export class ActionsComponent implements OnInit {
         },
       }
     );
-    this.draggingStarted$.pipe(
-      switchMap(() => fromEvent<MouseEvent>(this.box?.nativeElement, 'mousemove').pipe(
-        takeUntil(this.draggingFinished$),
-        tap((event) => console.log("Dragging to: (%O,%O)", event.clientX, event.clientY), err => console.error(err), () => console.log("MOVE COMPLETED")),
-        tap(({clientY, clientX}) => this.service.send(new MouseMoveEvent(clientX, clientY)))
-      ))).subscribe()
   }
 
   ngOnInit(): void {
@@ -129,5 +124,25 @@ export class ActionsComponent implements OnInit {
 
   onMouseDown({clientY, clientX}: MouseEvent) {
     this.service.send(new MouseDownEvent(clientX, clientY))
+  }
+
+  ngAfterViewInit(): void {
+    this.ngZone.runOutsideAngular(() => {
+      this.draggingStarted$.pipe(
+        switchMap(() => fromEvent<MouseEvent>(this.box?.nativeElement, 'mousemove').pipe(
+          takeUntil(this.draggingFinished$),
+          tap((event) => console.log("Dragging to: (%O,%O)", event.clientX, event.clientY), err => console.error(err), () => console.log("MOVE COMPLETED")),
+          tap(({clientY, clientX}) => this.service.send(new MouseMoveEvent(clientX, clientY)))
+        ))).subscribe()
+    });
+    this.service.state$.pipe(
+      map(s => s.context),
+      tap(context => {
+        this.box?.nativeElement.style.setProperty('--dx', context.dx);
+        this.box?.nativeElement.style.setProperty('--dy', context.dy);
+        this.box?.nativeElement.style.setProperty('--x', context.boxPosition.x);
+        this.box?.nativeElement.style.setProperty('--y', context.boxPosition.y);
+      }),
+    ).subscribe();
   }
 }
