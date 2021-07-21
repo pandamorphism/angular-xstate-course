@@ -3,63 +3,72 @@ import {assign, createMachine} from "xstate";
 import {InterpretedService, XstateAngular} from "xstate-angular";
 import {fromEvent, Observable, Subject} from "rxjs";
 import {filter, map, shareReplay, switchMap, takeUntil, tap} from "rxjs/operators";
+import {UntilDestroy, untilDestroyed} from "@ngneat/until-destroy";
 
 export interface DndStates {
   states: {
     idle: {};
     dragging: {};
+    draggedOut: {}
   }
 }
 
 export interface DnDContext {
-  dx: number;
-  dy: number;
-  boxPosition: { x: number, y: number }
+  delta: { x: number, y: number },
+  boxPosition: { x: number, y: number },
   point: { x: number, y: number },
+  dragCount: number,
 }
 
+const initialContext = {
+  point: {x: 0, y: 0},
+  delta: {x: 0, y: 0},
+  boxPosition: {x: 0, y: 0},
+  dragCount: 0,
+};
 const dndMachine = createMachine({
   id: 'dnd',
   initial: 'idle',
-  context: {
-    point: {x: 0, y: 0},
-    dx: 0,
-    dy: 0,
-    boxPosition: {x: 0, y: 0}
-  },
+  context: initialContext,
   states: {
     idle: {
       on: {
-        ESC: {
-          actions: assign({point: {x: 0, y: 0}, dx: 0, dy: 0, boxPosition: {x: 0, y: 0}})
-        },
-        MOUSE_DOWN: {
+        MOUSE_DOWN: [{
           target: 'dragging',
-          actions: assign({point: (context, event: MouseDownEvent) => ({x: event.clientX, y: event.clientY})}),
-        },
+          actions: 'setPoint',
+          cond: 'canDrag'
+        }, {
+          target: 'draggedOut',
+          cond: 'canNotDrag'
+        }]
       }
     },
     dragging: {
-      entry: ['onDraggingEntry'],
+      entry: ['onDraggingEntry', 'increaseMove'],
       exit: ['onDraggingExit'],
       on: {
         MOUSE_UP: {
           target: 'idle',
-          actions: assign<DnDContext, MouseUpEvent>({
-            boxPosition: (ctx: DnDContext, _) => ({x: ctx.boxPosition.x + ctx.dx, y: ctx.boxPosition.y + ctx.dy}),
-            point: (ctx, _) => ({x: ctx.point.x + ctx.dx, y: ctx.point.y + ctx.dy}),
-            dx: 0,
-            dy: 0
-          })
+          actions: 'draggingComplete',
         },
         MOUSE_MOVE: {
           actions: assign<DnDContext, MouseMoveEvent>({
-            dx: (ctx, event) => event.clientX - ctx.point.x,
-            dy: (ctx, event) => event.clientY - ctx.point.y,
+            delta: (ctx, event) => ({
+              x: event.clientX - ctx.point.x,
+              y: event.clientY - ctx.point.y
+            })
           })
         }
       }
     },
+    draggedOut: {
+      on: {
+        ESC: {
+          target: "idle",
+          actions: assign(initialContext)
+        },
+      }
+    }
   }
 })
 
@@ -89,7 +98,9 @@ export class MouseMoveEvent {
 }
 
 export type DnDMachineEvents = MouseDownEvent | MouseUpEvent | MouseMoveEvent | Esc
+const MAX_MOVES = 5;
 
+@UntilDestroy()
 @Component({
   selector: 'app-actions',
   templateUrl: './actions.component.html',
@@ -100,6 +111,7 @@ export class ActionsComponent implements OnInit, AfterViewInit {
   @ViewChild('box') box: ElementRef | undefined;
   service: InterpretedService<DnDContext, DndStates, DnDMachineEvents>
   currentState$: Observable<string> | undefined;
+  movesLeft$: Observable<number> | undefined;
   clickPoint$: Observable<string> | undefined;
   boxPosition$: Observable<{ x: number, y: number }> | undefined;
   private draggingFinished$: Subject<void> = new Subject();
@@ -109,14 +121,48 @@ export class ActionsComponent implements OnInit, AfterViewInit {
               private ngZone: NgZone) {
     this.service = this.xState.useMachine(dndMachine, {
         actions: {
-          onDraggingEntry: (_, event) => this.draggingStarted$.next(),
-          onDraggingExit: (_, event) => this.draggingFinished$.next(),
+          onDraggingEntry: () => this.draggingStarted$.next(),
+          onDraggingExit: () => this.draggingFinished$.next(),
+          increaseMove: assign<DnDContext, DnDMachineEvents>((ctx) =>
+            ({dragCount: ctx.dragCount + 1})),
+          setPoint: assign<DnDContext, DnDMachineEvents>({
+            point: (context, event) => {
+              if (event.type === 'MOUSE_DOWN') return {
+                x: event.clientX,
+                y: event.clientY
+              }; else throw Error(`Event ${event.type} is not supported`);
+            },
+          }),
+          moving: assign<DnDContext, DnDMachineEvents>({
+            delta: (ctx, event) => {
+              if (event.type === 'MOUSE_MOVE')
+                return ({
+                  x: event.clientX - ctx.point.x,
+                  y: event.clientY - ctx.point.y,
+                });
+              else throw Error('');
+            }
+          }),
+          draggingComplete: assign<DnDContext, DnDMachineEvents>({
+            boxPosition: (ctx: DnDContext, _) => ({
+              x: ctx.boxPosition.x + ctx.delta.x,
+              y: ctx.boxPosition.y + ctx.delta.y
+            }),
+            point: (ctx, _) => ({x: ctx.point.x + ctx.delta.x, y: ctx.point.y + ctx.delta.y}),
+            delta: {x: 0, y: 0}
+          })
+
         },
+        guards: {
+          canDrag: (ctx, _) => ctx.dragCount < MAX_MOVES,
+          canNotDrag: (ctx, _) => ctx.dragCount >= MAX_MOVES
+        }
       }
     );
   }
 
   ngOnInit(): void {
+    this.movesLeft$ = this.service.state$.pipe(map(s => MAX_MOVES - s.context.dragCount));
     this.currentState$ = this.service.state$.pipe(map(s => s.value as string))
     this.clickPoint$ = this.service.state$.pipe(map(s => `x: ${s.context.point?.x ?? 0}, y: ${s.context.point?.y ?? 0}`))
     this.boxPosition$ = this.service.state$.pipe(
@@ -125,7 +171,8 @@ export class ActionsComponent implements OnInit, AfterViewInit {
     );
     fromEvent<KeyboardEvent>(window.document.body, "keyup").pipe(
       filter(ev => ev.key === 'Escape'),
-      tap(_ => this.service.send(new Esc()))
+      tap(_ => this.service.send(new Esc())),
+      untilDestroyed(this),
     ).subscribe()
   }
 
@@ -141,19 +188,20 @@ export class ActionsComponent implements OnInit, AfterViewInit {
     this.ngZone.runOutsideAngular(() => {
       this.draggingStarted$.pipe(
         switchMap(() => fromEvent<MouseEvent>(this.box?.nativeElement, 'mousemove').pipe(
+          tap(({clientY, clientX}) => this.service.send(new MouseMoveEvent(clientX, clientY))),
           takeUntil(this.draggingFinished$),
-          tap((event) => console.log("Dragging to: (%O,%O)", event.clientX, event.clientY), err => console.error(err), () => console.log("MOVE COMPLETED")),
-          tap(({clientY, clientX}) => this.service.send(new MouseMoveEvent(clientX, clientY)))
         ))).subscribe()
     });
     this.service.state$.pipe(
       map(s => s.context),
+      tap(ctx => console.log("CTX: %O", ctx)),
       tap(context => {
-        this.box?.nativeElement.style.setProperty('--dx', context.dx);
-        this.box?.nativeElement.style.setProperty('--dy', context.dy);
+        this.box?.nativeElement.style.setProperty('--dx', context.delta.x);
+        this.box?.nativeElement.style.setProperty('--dy', context.delta.y);
         this.box?.nativeElement.style.setProperty('--x', context.boxPosition.x);
         this.box?.nativeElement.style.setProperty('--y', context.boxPosition.y);
       }),
+      untilDestroyed(this),
     ).subscribe();
   }
 }
