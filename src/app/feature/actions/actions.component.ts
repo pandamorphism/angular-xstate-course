@@ -56,6 +56,11 @@ const dndMachine = createMachine({
       }
     },
     idle: {
+      after: {
+        TIMEOUT: {
+          actions: 'delayedAction'
+        }
+      },
       on: {
         AUTHORIZATION: {
           cond: 'isLoggedOut',
@@ -187,12 +192,16 @@ export class ActionsComponent implements OnInit, AfterViewInit {
           }),
           onEnteringUnauthorizedState: assign({...initialContext, dragCount: MAX_MOVES}),
           onEsc: assign<DnDContext>((ctx) => ({...initialContext, isAuthorized: ctx.isAuthorized})),
+          delayedAction: (ctx, e) => console.log("Action with Delay: %O", e),
         },
         guards: {
           canDrag: (ctx, _) => ctx.dragCount < MAX_MOVES,
           canNotDrag: (ctx, _) => ctx.dragCount >= MAX_MOVES,
           isLoggedIn: (_, event) => event.type === 'AUTHORIZATION' && event.isLoggedIn,
           isLoggedOut: (_, event) => event.type === 'AUTHORIZATION' && !event.isLoggedIn,
+        },
+        delays: {
+          TIMEOUT: 2000
         }
       }
     );
