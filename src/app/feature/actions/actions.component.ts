@@ -5,11 +5,15 @@ import {fromEvent, Observable, Subject} from "rxjs";
 import {filter, map, shareReplay, switchMap, takeUntil, tap} from "rxjs/operators";
 import {UntilDestroy, untilDestroyed} from "@ngneat/until-destroy";
 
+const MAX_MOVES = 5;
+
 export interface DndStates {
   states: {
     idle: {};
     dragging: {};
-    draggedOut: {}
+    draggedOut: {},
+    checkingAuthorization: {},
+    unauthorized: {}
   }
 }
 
@@ -18,6 +22,7 @@ export interface DnDContext {
   boxPosition: { x: number, y: number },
   point: { x: number, y: number },
   dragCount: number,
+  isAuthorized: boolean,
 }
 
 const initialContext = {
@@ -25,14 +30,37 @@ const initialContext = {
   delta: {x: 0, y: 0},
   boxPosition: {x: 0, y: 0},
   dragCount: 0,
+  isAuthorized: false,
 };
 const dndMachine = createMachine({
   id: 'dnd',
-  initial: 'idle',
+  initial: 'checkingAuthorization',
   context: initialContext,
   states: {
+    checkingAuthorization: {
+      on: {
+        '': [
+          {target: 'idle', cond: (ctx) => ctx.isAuthorized},
+          {target: 'unauthorized'}
+        ]
+      }
+    },
+    unauthorized: {
+      entry: 'onEnteringUnauthorizedState',
+      on: {
+        AUTHORIZATION: {
+          target: 'idle',
+          cond: 'isLoggedIn',
+          actions: assign({dragCount: 0})
+        }
+      }
+    },
     idle: {
       on: {
+        AUTHORIZATION: {
+          cond: 'isLoggedOut',
+          target: 'unauthorized'
+        },
         MOUSE_DOWN: [{
           target: 'dragging',
           actions: 'setPoint',
@@ -65,7 +93,7 @@ const dndMachine = createMachine({
       on: {
         ESC: {
           target: "idle",
-          actions: assign(initialContext)
+          actions: 'onEsc'
         },
       }
     }
@@ -86,6 +114,13 @@ export class MouseUpEvent {
   }
 }
 
+export class Authorization {
+  readonly type = 'AUTHORIZATION'
+
+  constructor(public isLoggedIn: boolean) {
+  }
+}
+
 export class Esc {
   readonly type = 'ESC'
 }
@@ -97,8 +132,7 @@ export class MouseMoveEvent {
   }
 }
 
-export type DnDMachineEvents = MouseDownEvent | MouseUpEvent | MouseMoveEvent | Esc
-const MAX_MOVES = 5;
+export type DnDMachineEvents = MouseDownEvent | MouseUpEvent | MouseMoveEvent | Esc | Authorization
 
 @UntilDestroy()
 @Component({
@@ -150,12 +184,15 @@ export class ActionsComponent implements OnInit, AfterViewInit {
             }),
             point: (ctx, _) => ({x: ctx.point.x + ctx.delta.x, y: ctx.point.y + ctx.delta.y}),
             delta: {x: 0, y: 0}
-          })
-
+          }),
+          onEnteringUnauthorizedState: assign({...initialContext, dragCount: MAX_MOVES}),
+          onEsc: assign<DnDContext>((ctx) => ({...initialContext, isAuthorized: ctx.isAuthorized})),
         },
         guards: {
           canDrag: (ctx, _) => ctx.dragCount < MAX_MOVES,
-          canNotDrag: (ctx, _) => ctx.dragCount >= MAX_MOVES
+          canNotDrag: (ctx, _) => ctx.dragCount >= MAX_MOVES,
+          isLoggedIn: (_, event) => event.type === 'AUTHORIZATION' && event.isLoggedIn,
+          isLoggedOut: (_, event) => event.type === 'AUTHORIZATION' && !event.isLoggedIn,
         }
       }
     );
@@ -203,5 +240,10 @@ export class ActionsComponent implements OnInit, AfterViewInit {
       }),
       untilDestroyed(this),
     ).subscribe();
+  }
+
+  authorize(isLoggedIn: boolean, $event: MouseEvent) {
+    $event.preventDefault();
+    this.service.send(new Authorization(isLoggedIn))
   }
 }

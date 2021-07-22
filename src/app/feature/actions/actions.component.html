@@ -2,5 +2,12 @@
      [attr.data-state]="currentState$ | async"
      [attr.data-point]="clickPoint$ | async"
      (mouseup)="onMouseUp($event)"
-     (mousedown)="onMouseDown($event)"></div>
+     (mousedown)="onMouseDown($event)">
+  <button *ngIf="(currentState$ | async) === 'unauthorized'; else logoutBtn"
+          (click)="authorize(true,$event)">Authorize
+  </button>
+  <ng-template #logoutBtn>
+    <button (click)="authorize(false, $event)">Log Out</button>
+  </ng-template>
+</div>
 <div>Moves Left: {{movesLeft$ | async }} </div>
