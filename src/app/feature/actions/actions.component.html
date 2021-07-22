@@ -1,6 +1,7 @@
 <div id="box" #box
      [attr.data-state]="currentState$ | async"
      [attr.data-point]="clickPoint$ | async"
+     [ngClass]="{unauthorized: (currentState$ | async) === 'unauthorized'}"
      (mouseup)="onMouseUp($event)"
      (mousedown)="onMouseDown($event)">
   <button *ngIf="(currentState$ | async) === 'unauthorized'; else logoutBtn"

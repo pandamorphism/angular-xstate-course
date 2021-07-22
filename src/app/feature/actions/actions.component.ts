@@ -153,7 +153,7 @@ export class ActionsComponent implements OnInit, AfterViewInit {
 
   constructor(private readonly xState: XstateAngular<DnDContext, DndStates, DnDMachineEvents>,
               private ngZone: NgZone) {
-    this.service = this.xState.useMachine(dndMachine, {
+    this.service = this.xState.useMachine(dndMachine.withContext({...initialContext, isAuthorized: true}), {
         actions: {
           onDraggingEntry: () => this.draggingStarted$.next(),
           onDraggingExit: () => this.draggingFinished$.next(),

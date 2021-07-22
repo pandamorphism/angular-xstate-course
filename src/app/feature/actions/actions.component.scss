@@ -10,6 +10,10 @@
   border-radius: 0.5rem;
   position: relative;
 
+  &.unauthorized {
+    background-color: var(--color-secondary);
+  }
+
   button {
     display: block;
     padding-top: 50px;
